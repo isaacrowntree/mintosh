@@ -41,7 +41,7 @@ for line in sys.stdin:
         if n <= 20: print("   missing or different:", p, file=sys.stderr)
 print(n)')
 if [ -z "$bad" ] && [ "$missing" = 0 ]; then
-  echo "   All files are in place. ~/mac-setup can be deleted (set up Backups first: it is the only other copy)."
+  echo "   All files are in place. ~/mac-setup can be deleted (keep another copy first: it is the only other one)."
 else
   echo "!! $missing file(s) missing or different - do NOT delete ~/mac-setup"; bad=1
 fi

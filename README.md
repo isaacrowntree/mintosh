@@ -15,7 +15,7 @@ make it look and work like macOS, so whoever used the Mac doesn't have to relear
 - Black boot screen with an Apple logo, a Sonoma-style login screen
 - Battery and sleep like a Mac: sleep on lid close, then save to disk and power off after 3 h asleep, so a sleeping
   laptop lasts weeks; keyboard backlight from the light sensor; memory compression; YouTube on the graphics chip
-- Force Quit, weekly backups, a firewall, and the fixes 2013-2015 MacBooks need to run Linux reliably
+- Force Quit, a firewall, and the fixes 2013-2015 MacBooks need to run Linux reliably
 
 | Light | Dark |
 |---|---|
@@ -93,9 +93,8 @@ English only by default. For a second language add `LANG2=es_CO` to script 1 (`s
 1-system-setup.sh`) and `KBD=es` to script 3 for a second keyboard layout.
 Run scripts 3 and 5 in a Terminal on the Mint machine (script 4 is fine over SSH): a panel or dock started over SSH
 loses the session.
-Then: open **Backups** and choose where the weekly backup goes (a USB disk, or Google Drive after signing in), and
-let it run once; Timeshift (system only, 3 daily snapshots); sign in to Chrome; import Safari bookmarks if
-needed; delete `~/mac-setup` once script 2 says every file is in place; and `bash tools/close-access.sh user@ip`
+Then: Timeshift (system only, 3 daily snapshots); sign in to Chrome; import Safari bookmarks if
+needed; delete `~/mac-setup` once script 2 says every file is in place (keep another copy of the files somewhere first); and `bash tools/close-access.sh user@ip`
 from the helper Mac (removes the helper key and turns SSH off).
 
 To come back later (re-run scripts 3-5 after changes): `bash tools/open-access.sh` on the helper Mac prints a
@@ -132,7 +131,7 @@ Keep a second copy of `organized/` + `converted/` before deleting the raw backup
   Alt+Shift, shown in the top bar). Chrome as default browser, LibreOffice saving
   .docx/.xlsx/.pptx by default, MS core fonts + Carlito/Caladea, Inter (SF Pro stand-in), Epson/Canon drivers,
   automatic updates, password login (autologin off so the keyring unlocks itself). A firewall that lets nothing
-  connect in, SSH with keys only. Déjà Dup backs up the home folder every week, like Time Machine. Mint's Welcome
+  connect in, SSH with keys only. Mint's Welcome
   window and update shield stay hidden (updates install by themselves).
 - **Memory:** compressed before anything is swapped (zswap, zstd), as macOS does, so 4 GB copes with many tabs;
   earlyoom closes the biggest app instead of letting the desktop freeze when memory runs out.
@@ -202,6 +201,8 @@ Keep a second copy of `organized/` + `converted/` before deleting the raw backup
 | No Wi-Fi at all: no `14e4:43a0` in `lspci`, `00:1c.2: retraining failed` at boot, Bluetooth still works | the Wi-Fi chip on the card has died - see below |
 | No camera (FaceTime HD, `14e4:1570`) | `facetimehd` driver + firmware via DKMS |
 | Runs hot | `mbpfan` (laptops) |
+| Processor never reaches its deep idle states (PC6/PC7): package ~2-2.8 W at idle instead of ~1 W | Apple's firmware leaves the FaceTime camera's PCIe link without its common clock and with power saving off, and that one busy link holds the whole package at PC3. `mintosh-camera-link` sets the clock, retrains the link and allows L1, at start-up and after every sleep |
+| Thunderbolt controller powered all the time (~0.7 W at idle on a 2013 Air) | `acpi_osi=!Darwin`: Linux otherwise tells Apple's firmware it is macOS, and the firmware keeps Thunderbolt on. Without it the firmware switches Thunderbolt off at start-up, so Thunderbolt devices must be connected before start-up (`TB=1` keeps it on). MacBook Airs only; likely the same on 2012-15 MacBook Pros, untested |
 | 2015 MacBook Pro 15" (BCM43602) or 12" MacBook (BCM4350) Wi-Fi | built-in `brcmfmac`; `wl` is only installed for the chips it supports |
 | Camera or Wi-Fi gone after waking | `/usr/lib/systemd/system-sleep/mintosh` unloads the camera driver before sleep and reloads it after, and reloads `wl` after a resume from disk |
 | A kernel update leaves Wi-Fi without its driver (no Wi-Fi = no update to fix it) | `mintosh-bootcheck` starts the previous kernel until the newest one has the driver again; the camera driver builds from a hook that never stops a kernel update |
@@ -302,7 +303,7 @@ Downloaded or installed at run time, not redistributed here:
 [Toshy](https://github.com/RedBearAK/toshy), [rofi](https://github.com/davatorium/rofi),
 [Touchégg](https://github.com/JoseExposito/touchegg), [vala-panel-appmenu](https://github.com/rilian-la-te/vala-panel-appmenu),
 [Plank](https://launchpad.net/plank), [lightdm-gtk-greeter](https://github.com/Xubuntu/lightdm-gtk-greeter),
-[TLP](https://linrunner.de/tlp/), [h264ify](https://github.com/erkserkserks/h264ify), [earlyoom](https://github.com/rfjakob/earlyoom), [Déjà Dup](https://apps.gnome.org/DejaDup/), [facetimehd](https://github.com/patjak/facetimehd), [mbpfan](https://github.com/linux-on-mac/mbpfan),
+[TLP](https://linrunner.de/tlp/), [h264ify](https://github.com/erkserkserks/h264ify), [earlyoom](https://github.com/rfjakob/earlyoom), [facetimehd](https://github.com/patjak/facetimehd), [mbpfan](https://github.com/linux-on-mac/mbpfan),
 and Linux Mint and Xfce themselves. Each keeps its own licence.
 
 ## License and trademarks

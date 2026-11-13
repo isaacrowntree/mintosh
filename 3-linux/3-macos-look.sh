@@ -547,15 +547,6 @@ log "No Mint pop-ups a Mac never shows: Welcome window at login, update shield (
 mkdir -p "$HOME/.linuxmint/mintwelcome" && touch "$HOME/.linuxmint/mintwelcome/norun.flag"
 gsettings set com.linuxmint.updates hide-systray true 2>/dev/null || true
 
-log "Backups like Time Machine: Déjà Dup saves your home folder every week (choose where in Backups, once)"
-if command -v deja-dup >/dev/null; then
-  gsettings set org.gnome.DejaDup periodic true 2>/dev/null
-  gsettings set org.gnome.DejaDup periodic-period 7 2>/dev/null
-  gsettings set org.gnome.DejaDup include-list "['\$HOME']" 2>/dev/null
-  gsettings set org.gnome.DejaDup exclude-list "['\$TRASH', '\$HOME/.cache', '\$HOME/mac-setup', '\$HOME/Downloads']" 2>/dev/null
-fi
-
-
 log "Chrome and Gemini follow the system language (Settings > Languages), checked at each login"
 # Chrome keeps the website languages it was given when the profile was made (English here), so Spanish pages and
 # Gemini came up in English with a Translate offer. Before Chrome starts, put the system language first.

@@ -14,6 +14,8 @@ PORT="${PORT:-8765}"
 HOURS="${HOURS:-48}"
 [ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N "" -C mintosh -f "$KEY"
 IP=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+# Every address of this Mac (Wi-Fi and a USB Ethernet adapter can both be on the network); the firewall lets these in
+IPS=$(ifconfig | awk '/inet / && $2 !~ /^127\./ {print $2}' | tr '\n' ' ')
 UNTIL=$(date -u -v+"${HOURS}"H +%Y%m%d%H%MZ)   # OpenSSH expiry-time, UTC
 UNTIL_LOCAL=$(date -v+"${HOURS}"H "+%Y-%m-%d %H:%M")
 TUNNEL="${TUNNEL:-}"
@@ -30,9 +32,9 @@ if [ -n "$TUNNEL" ]; then
 fi
 D=$(mktemp -d)
 trap 'rm -rf "$D"' EXIT
-P=$(openssl rand -hex 12)   # unguessable path: the script holds a key
+P=$(openssl rand -hex 4)    # hard-to-guess path: the script holds a key
 mkdir "$D/$P"
-cat > "$D/$P/grant-access.sh" <<EOF
+cat > "$D/$P/g" <<EOF
 #!/usr/bin/env bash
 # Temporary access for setup from $(scutil --get ComputerName 2>/dev/null || hostname), until $UNTIL_LOCAL.
 # Undone with tools/close-access.sh, or by itself then.
@@ -47,7 +49,9 @@ sudo chmod 440 /etc/sudoers.d/99-mintosh-setup
 sudo visudo -cf /etc/sudoers.d/99-mintosh-setup
 dpkg -s openssh-server >/dev/null 2>&1 || sudo apt-get install -y openssh-server
 sudo systemctl enable --now ssh
-! command -v ufw >/dev/null || sudo ufw allow from $IP to any port 22 proto tcp comment mintosh-helper >/dev/null
+if command -v ufw >/dev/null; then
+  for ip in $IPS; do sudo ufw allow from \$ip to any port 22 proto tcp comment mintosh-helper >/dev/null; done
+fi
 # One clean-up for every way access ends: close-access.sh runs it, and a timer runs it at the deadline
 sudo tee /usr/local/sbin/mintosh-close >/dev/null <<'CLOSE'
 #!/bin/sh
@@ -73,7 +77,7 @@ printf '[Unit]\nDescription=mintosh: close helper access at $UNTIL_LOCAL\n[Timer
   | sudo tee /etc/systemd/system/mintosh-close.timer >/dev/null
 sudo systemctl daemon-reload; sudo systemctl enable --now mintosh-close.timer
 EOF
-[ -z "$TUNNEL" ] || cat >> "$D/$P/grant-access.sh" <<EOF
+[ -z "$TUNNEL" ] || cat >> "$D/$P/g" <<EOF
 umask 077
 cat > ~/.ssh/mintosh-tunnel <<'KEY'
 $(cat "$TKEY")
@@ -95,15 +99,16 @@ UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable --now mintosh-tunnel
 EOF
-cat >> "$D/$P/grant-access.sh" <<EOF
+cat >> "$D/$P/g" <<EOF
 echo
 echo "Done. This computer's address: \$(hostname -I)${TUNNEL:+ (and a tunnel to $IP is running)}"
 echo "Access closes by itself at $UNTIL_LOCAL."
 EOF
-SUM=$(shasum -a 256 "$D/$P/grant-access.sh" | cut -d' ' -f1)
-echo "On the Mint machine, open Terminal and run (it checks the download before running it):"
+SUM=$(shasum -a 256 "$D/$P/g" | cut -d' ' -f1)
+echo "On the Mint machine, open Terminal and run:"
 echo
-echo "  wget -qO /tmp/g.sh http://$IP:$PORT/$P/grant-access.sh && echo '$SUM  /tmp/g.sh' | sha256sum -c --quiet && bash /tmp/g.sh"
+echo "  wget -qO- $IP:$PORT/$P/g|bash"
 echo
+echo "(or, checking the download first: wget -qO /tmp/g $IP:$PORT/$P/g && echo '$SUM  /tmp/g' | sha256sum -c && bash /tmp/g)"
 echo "Access closes by itself at $UNTIL_LOCAL."
 cd "$D" && python3 -m http.server "$PORT" --bind 0.0.0.0

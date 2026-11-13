@@ -6,6 +6,7 @@
 # Time zone is left as chosen in the installer. English only by default; for a second language the user can switch
 # to in Settings > Languages, pass it: sudo LANG2=es_CO bash 1-system-setup.sh   (or fr_FR, de_DE, pt_BR, ...)
 # IOMMU_OFF=1 adds intel_iommu=off, for the Marvell SSDs in some 2013-14 Macs that otherwise fail to boot.
+# TB=1 keeps Thunderbolt powered on MacBook Airs (by default it's off unless connected at start-up).
 set -uo pipefail
 cd "$(dirname "$0")"
 [ "$(id -u)" = 0 ] || { echo "Run with sudo"; exit 1; }
@@ -21,6 +22,16 @@ if [ -n "${IOMMU_OFF:-}" ]; then
   grep -q intel_iommu=off /etc/default/grub || sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&intel_iommu=off /' /etc/default/grub
 elif has_pci '1b4b:9183'; then
   echo "   Marvell 88SS9183 SSD: if it fails to boot with 'failed to IDENTIFY' errors (seen on Toshiba TS0256F), re-run with IOMMU_OFF=1"
+fi
+# Thunderbolt off when nothing is plugged in at start-up (MacBook Airs; ~0.7 W at idle on a 2013 Air). Linux tells
+# Apple's firmware it is macOS (_OSI "Darwin"), and the firmware then keeps the Thunderbolt controller powered all
+# the time; without it, the firmware switches it off at start-up. Thunderbolt devices then only work when connected
+# before start-up. TB=1 keeps Thunderbolt on.
+if grep -q '^MacBookAir' /sys/class/dmi/id/product_name 2>/dev/null && lspci | grep -qi thunderbolt && [ "${TB:-}" != 1 ]; then
+  log "Thunderbolt: off unless connected at start-up (saves ~0.7 W; TB=1 keeps it on)"
+  grep -q 'acpi_osi=!Darwin' /etc/default/grub || sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&acpi_osi=!Darwin /' /etc/default/grub
+elif [ "${TB:-}" = 1 ]; then
+  sed -i 's/acpi_osi=!Darwin //' /etc/default/grub
 fi
 # SATA link power saving depends on who made the SSD: Toshiba (APPLE SSD TS...) drops the link with it on (freezes
 # after ~1 h), SanDisk (APPLE SSD SD...) drops it with it OFF (errors within a minute, link slows to 1.5 Gb/s).
@@ -113,10 +124,10 @@ log "Microsoft fonts so Word documents look the same"
 echo 'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true' | debconf-set-selections
 apt-get install -y ttf-mscorefonts-installer fonts-crosextra-carlito fonts-crosextra-caladea fonts-inter   # Inter: open stand-in for Apple's SF Pro
 
-log "Office (English${L2:+ + $L2}), Mac-look dock, tools, backups (Déjà Dup)"
+log "Office (English${L2:+ + $L2}), Mac-look dock, tools"
 apt-get install -y libreoffice libreoffice-help-en-us mythes-en-us \
   plank git sassc libglib2.0-dev-bin libxml2-utils xdotool xprintidle \
-  convmv rsync openssh-server deja-dup
+  convmv rsync openssh-server
 [ -z "$L2" ] || apt-get install -y "libreoffice-l10n-$L2" "libreoffice-help-$L2" "hyphen-$L2" "mythes-$L2" || true
 
 log "iPhone photos (HEIC) open and show thumbnails like JPGs"
@@ -197,6 +208,28 @@ EOF
   rm -rf "$F"
 fi
 
+if has_pci '14e4:1570'; then
+  log "Camera link power saving, so the processor can reach its deep idle states (package 2.1 W -> ~1 W at idle on a 2013 Air)"
+  # Apple's firmware leaves the camera's PCIe link without its common clock set and with power saving (ASPM) off,
+  # and Linux keeps the firmware's link settings. A link that never idles keeps the whole processor package out of
+  # PC6/PC7. Set the clock as the camera side already has it, retrain, then allow L1. At start-up and after sleep.
+  cat > /usr/local/sbin/mintosh-camera-link <<'EOF'
+#!/bin/sh
+# mintosh: power saving (ASPM L1) on the FaceTime HD camera's PCIe link
+D=$(lspci -D -d 14e4:1570 | awk 'NR==1{print $1}'); [ -n "$D" ] || exit 0
+R=$(basename "$(dirname "$(readlink -f "/sys/bus/pci/devices/$D")")")
+setpci -s "$R" CAP_EXP+0x10.w=0x0040:0x0040   # common clock
+setpci -s "$R" CAP_EXP+0x10.w=0x0020:0x0020   # retrain the link with it
+sleep 0.2
+setpci -s "$D" CAP_EXP+0x10.w=0x0002:0x0003   # L1: camera side first, then the port
+setpci -s "$R" CAP_EXP+0x10.w=0x0002:0x0003
+EOF
+  chmod 755 /usr/local/sbin/mintosh-camera-link
+  printf '[Unit]\nDescription=mintosh: camera link power saving\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/mintosh-camera-link\n[Install]\nWantedBy=multi-user.target\n' \
+    > /etc/systemd/system/mintosh-camera-link.service
+  systemctl daemon-reload; systemctl enable --now mintosh-camera-link
+fi
+
 log "Login screen: macOS Sonoma-style wallpaper (WhiteSur recreation)"
 W=$(mktemp -d)
 git clone -q --depth 1 https://github.com/vinceliuice/WhiteSur-wallpapers.git "$W" &&
@@ -224,6 +257,7 @@ case "$1" in
     # suspend-then-hibernate says which one actually happened in SYSTEMD_SLEEP_ACTION
     if [ "${SYSTEMD_SLEEP_ACTION:-$2}" = hibernate ] && lsmod | grep -q '^wl '; then modprobe -r wl && modprobe wl; fi
     [ -f /run/mintosh-camera ] && { modprobe facetimehd; rm -f /run/mintosh-camera; }
+    [ -x /usr/local/sbin/mintosh-camera-link ] && /usr/local/sbin/mintosh-camera-link
     ;;
 esac
 exit 0

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Keyboard backlight like a MacBook: on in dim light, off in bright light, off after 30 s without typing or touching
+# the trackpad, back on at the next key press. Reads the Mac's ambient light sensor (applesmc) and sets the backlight
+# through UPower (no root needed). The brightness keys still work; a level set with them is kept.
+LIGHT=/sys/devices/platform/applesmc.768/light
+[ -r "$LIGHT" ] || exit 0
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/keyboard-light.lock"; flock -n 9 || exit 0   # one copy per login
+U=(--system org.freedesktop.UPower /org/freedesktop/UPower/KbdBacklight org.freedesktop.UPower.KbdBacklight)
+get() { busctl call "${U[@]}" GetBrightness 2>/dev/null | awk '{print $2}'; }
+set_() { busctl call "${U[@]}" SetBrightness i "$1" >/dev/null 2>&1; }
+max=$(busctl call "${U[@]}" GetMaxBrightness 2>/dev/null | awk '{print $2}'); [ -n "$max" ] || exit 0
+SID="${XDG_SESSION_ID:-}"
+want=-1; manual=""; dark=0
+while sleep 2; do
+  # Stop with the login session (a loop like this outlives logout otherwise)
+  [ -z "$SID" ] || loginctl show-session "$SID" -p State --value 2>/dev/null | grep -qE 'active|online' || exit 0
+  cur=$(get); [ -n "$cur" ] || continue
+  # Changed with the brightness keys since we last set it: keep that level from now on
+  [ "$want" -ge 0 ] && [ "$cur" != "$want" ] && [ $dark = 0 ] && manual=$cur
+  if [ "$(xprintidle 2>/dev/null || echo 0)" -gt 30000 ]; then
+    [ "$cur" = 0 ] || set_ 0; want=0; dark=1; continue
+  fi
+  dark=0
+  # Sensor reads "(left,right)"; indoor lamp light is ~2, daylight in the tens
+  lux=$(tr -d '()' < "$LIGHT" | awk -F, '{print ($1>$2)?$1:$2}')
+  if [ "$lux" -le 3 ]; then t=$((max / 2)); elif [ "$lux" -le 12 ]; then t=$((max / 4)); else t=0; fi
+  t=${manual:-$t}
+  [ "$cur" = "$t" ] || set_ "$t"
+  want=$t
+done

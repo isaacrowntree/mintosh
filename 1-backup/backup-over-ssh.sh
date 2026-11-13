@@ -16,23 +16,27 @@ SSH() { ssh -o BatchMode=yes -o IdentitiesOnly=yes -i "$KEY" "$DEST" "$@" 2> >(g
 L="$B/backup.log"
 mkdir -p "$B/home" "$B/extras"
 echo "START $(date)" > "$L"
+fail=""
+# Each copy is a pipe: a dropped connection or unreadable file must show up, not end in "ALL DONE"
+check() { local rc=("${PIPESTATUS[@]}"); [ "${rc[0]}" = 0 ] && [ "${rc[1]}" = 0 ] || { echo "!! FAILED: $1 (exit ${rc[*]})" | tee -a "$L"; fail=1; }; }
 
 echo "== home" | tee -a "$L"
-SSH 'cd ~ && tar -cf - --exclude Library/Caches --exclude Library/Logs --exclude .Trash .' 2>>"$L" | tar -xf - -C "$B/home" 2>>"$L"
+SSH 'cd ~ && tar -cf - --exclude Library/Caches --exclude Library/Logs --exclude .Trash .' 2>>"$L" | tar -xf - -C "$B/home" 2>>"$L"; check home
 echo "home done $(date)" | tee -a "$L"
 
 for vol in "$@"; do
   name=$(basename "$vol"); mkdir -p "$B/$name"
   echo "== $vol" | tee -a "$L"
-  SSH "cd '$vol' && tar -cf - --exclude .Spotlight-V100 --exclude .fseventsd --exclude .Trashes --exclude .TemporaryItems --exclude .DocumentRevisions-V100 ." 2>>"$L" | tar -xf - -C "$B/$name" 2>>"$L"
+  SSH "cd '$vol' && tar -cf - --exclude .Spotlight-V100 --exclude .fseventsd --exclude .Trashes --exclude .TemporaryItems --exclude .DocumentRevisions-V100 ." 2>>"$L" | tar -xf - -C "$B/$name" 2>>"$L"; check "$vol"
   echo "$name done $(date)" | tee -a "$L"
 done
 
 echo "== extras" | tee -a "$L"
-SSH 'tar -cf - -C /Users Shared' 2>>"$L" | tar -xf - -C "$B/extras" 2>>"$L"
-SSH 'tar -cf - -C /Library Fonts' 2>>"$L" | tar -xf - -C "$B/extras" 2>>"$L"
+SSH 'tar -cf - -C /Users Shared' 2>>"$L" | tar -xf - -C "$B/extras" 2>>"$L"; check /Users/Shared
+SSH 'tar -cf - -C /Library Fonts' 2>>"$L" | tar -xf - -C "$B/extras" 2>>"$L"; check /Library/Fonts
 # system_profiler can hang on old Macs; the plain listing is enough
 SSH 'ls /Applications; echo ---; ls /Applications/Utilities' > "$B/extras/installed-apps.txt" 2>>"$L"
+if [ -n "$fail" ]; then echo "INCOMPLETE $(date) - do NOT wipe the Mac; see $L" | tee -a "$L"; exit 1; fi
 echo "ALL DONE $(date)" | tee -a "$L"
 
 echo

@@ -33,7 +33,7 @@ DESK="$(xdg-user-dir DESKTOP)"
 
 # Script 4 installs these too, but the look below needs them now: picom for the glass blur (without it at this point
 # the blur is never set up), Wnck for Mission Control, rofi for Spotlight and Launchpad
-need=""; for p in picom rofi gir1.2-wnck-3.0 wmctrl xdotool; do dpkg -s "$p" >/dev/null 2>&1 || need="$need $p"; done
+need=""; for p in picom rofi gir1.2-wnck-3.0 wmctrl xdotool mesa-utils xprintidle zenity; do dpkg -s "$p" >/dev/null 2>&1 || need="$need $p"; done
 if [ -n "$need" ]; then log "Install:$need (asks for your password)"; sudo apt-get install -y $need; fi
 
 log "Download the MacTahoe theme, icons and cursors (vinceliuice's macOS Tahoe recreation) and macOS-style wallpapers"
@@ -42,12 +42,14 @@ for r in MacTahoe-gtk-theme MacTahoe-icon-theme WhiteSur-wallpapers; do
 done
 
 log "Install them, light and dark (into your home folder, no sudo)"
-if [ -d "$HOME/.themes/MacTahoe-Light" ] && [ -d "$HOME/.themes/MacTahoe-Dark" ]; then echo "   already installed"; else
-  export USER="${USER:-$(id -un)}"   # its installer finds your home folder from this when there's no login (cron, ssh -T)
-  (cd "$T/MacTahoe-gtk-theme" && ./install.sh -c light -c dark) || echo "   theme install failed - check its README flags"
-  (cd "$T/MacTahoe-icon-theme" && ./install.sh)                   || echo "   icon theme install failed"
-  (cd "$T/MacTahoe-icon-theme/cursors" && ./install.sh)           || echo "   cursor install failed"
-fi
+export USER="${USER:-$(id -un)}"   # its installer finds your home folder from this when there's no login (cron, ssh -T)
+# Each part on its own, so one that failed last time is tried again
+if [ -d "$HOME/.themes/MacTahoe-Light" ] && [ -d "$HOME/.themes/MacTahoe-Dark" ]; then echo "   theme already installed"
+else (cd "$T/MacTahoe-gtk-theme" && ./install.sh -c light -c dark) || echo "   theme install failed - check its README flags"; fi
+if ls -d "$HOME"/.local/share/icons/MacTahoe-light "$HOME"/.icons/MacTahoe-light >/dev/null 2>&1; then echo "   icons already installed"
+else (cd "$T/MacTahoe-icon-theme" && ./install.sh) || echo "   icon theme install failed"; fi
+if ls -d "$HOME"/.local/share/icons/MacTahoe-cursors "$HOME"/.icons/MacTahoe-cursors >/dev/null 2>&1; then echo "   cursors already installed"
+else (cd "$T/MacTahoe-icon-theme/cursors" && ./install.sh) || echo "   cursor install failed"; fi
 
 log "Helper programs (Spotlight, Launchpad, Mission Control, appearance, Apple menu actions, battery warnings...)"
 install -m 755 "$HERE"/bin/* "$B"/
@@ -122,7 +124,7 @@ am about     "About This Computer" "Acerca de este equipo"      "$B/about-this-c
 am settings  "System Settings…"    "Configuración del sistema…" xfce4-settings-manager           emblem-system-symbolic
 am look      "Appearance…"         "Apariencia…"                "$B/appearance --choose"         weather-clear-symbolic
 am store     "App Store…"          "Tienda de aplicaciones…"    mintinstall                      system-software-install-symbolic
-am forcequit "Force Quit…"         "Forzar salida…"             xfce4-taskmanager                process-stop-symbolic
+am forcequit "Force Quit…"         "Forzar salida…"             "$B/force-quit"                  process-stop-symbolic
 am sleep     "Sleep"               "Reposo"                     "xfce4-session-logout --suspend" weather-clear-night-symbolic
 am restart   "Restart…"            "Reiniciar…"                 "$B/apple-action restart"        system-reboot-symbolic
 am shutdown  "Shut Down…"          "Apagar…"                    "$B/apple-action shutdown"       system-shutdown-symbolic
@@ -366,12 +368,20 @@ for d in "$HOME"/.config/xfce4/panel/launcher-*; do
 done
 panel_restart   # a running panel keeps showing plugins removed from its settings until it restarts
 
+log "YouTube in H.264, which this Mac's graphics chip plays by itself (VP9/AV1 run on the processor and drain the battery)"
+# The extension comes from Chrome policy (script 1). Hardware video decoding is opt-in in Chrome on Linux: this
+# launcher copy turns it on and replaces Chrome's in the dock, Launchpad and Spotlight.
+if [ -f /usr/share/applications/google-chrome.desktop ]; then
+  sed 's#^Exec=/usr/bin/google-chrome-stable#Exec=/usr/bin/google-chrome-stable --enable-features=VaapiVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxGL#' \
+    /usr/share/applications/google-chrome.desktop > "$A/google-chrome.desktop"
+fi
+
 log "Dock (Plank) with the everyday apps"
 
 L="$HOME/.config/plank/dock1/launchers"; mkdir -p "$L"
 items=()
 for app in thunar launchpad google-chrome libreoffice-writer libreoffice-calc libreoffice-impress xreader; do
-  f=$(ls /usr/share/applications/$app.desktop "$A/$app.desktop" 2>/dev/null | head -1)
+  f=$(ls "$A/$app.desktop" /usr/share/applications/$app.desktop 2>/dev/null | head -1)   # mintosh's own copy first
   [ -n "$f" ] || { echo "   (no launcher for $app)"; continue; }
   printf '[PlankDockItemPreferences]\nLauncher=file://%s\n' "$f" > "$L/$app.dockitem"
   items+=("'$app.dockitem'")
@@ -385,7 +395,8 @@ printf '[PlankDockItemPreferences]\nLauncher=file://%s\n' "$A/dock-downloads.des
 printf '[PlankDockItemPreferences]\nLauncher=docklet://trash\n' > "$L/trash.dockitem"
 items+=("'separator.dockitem'" "'downloads.dockitem'" "'trash.dockitem'")
 D=net.launchpad.plank.dock.settings:/net/launchpad/plank/docks/dock1/
-gsettings set "$D" dock-items "[$(IFS=,; echo "${items[*]}")]" 2>/dev/null || true
+# Only the first time: a re-run keeps the apps and order the user has set since
+[ "$(gsettings get "$D" dock-items 2>/dev/null)" = "@as []" ] && gsettings set "$D" dock-items "[$(IFS=,; echo "${items[*]}")]" 2>/dev/null || true
 gsettings set "$D" icon-size 56 2>/dev/null || true
 gsettings set "$D" zoom-enabled true 2>/dev/null || true
 gsettings set "$D" current-workspace-only false 2>/dev/null || true
@@ -456,15 +467,16 @@ for m in "<Shift><Super>" "<Primary><Shift>"; do
   X xfce4-keyboard-shortcuts "/commands/custom/${m}4" string "$B/screenshot area"
 done
 
-log "Keyboard: US English${KBD:+, plus ${KBD%%,*} (switch with Alt+Shift)}"
-# English only by default. A second keyboard layout is opt-in: KBD=es bash 3-macos-look.sh  (es, fr, de, latam, ...)
+# The layout chosen in the installer (US, UK, German...); a second one is opt-in: KBD=es bash 3-macos-look.sh
+BASE=$(. /etc/default/keyboard 2>/dev/null; echo "${XKBLAYOUT%%,*}"); BASE=${BASE:-us}
+log "Keyboard: $BASE${KBD:+, plus ${KBD%%,*} (switch with Alt+Shift)}"
 X keyboard-layout /Default/XkbDisable bool false
 if [ -n "${KBD:-}" ]; then
-  X keyboard-layout /Default/XkbLayout string "$KBD,us"
+  X keyboard-layout /Default/XkbLayout string "$KBD,$BASE"
   X keyboard-layout /Default/XkbVariant string ","
   X keyboard-layout /Default/XkbOptions/Group string "grp:alt_shift_toggle"
 else
-  X keyboard-layout /Default/XkbLayout string "us"
+  X keyboard-layout /Default/XkbLayout string "$BASE"
   X keyboard-layout /Default/XkbVariant string ""
 fi
 
@@ -481,7 +493,7 @@ done
 for k in "<Primary>Up" "<Super>Up"; do X xfce4-keyboard-shortcuts "/commands/custom/$k" string "$B/mission-control"; done
 
 log "⌘⌥Esc (Ctrl+Alt+Esc once Toshy maps ⌘) = Force Quit, not Xfce's xkill skull cursor"
-X xfce4-keyboard-shortcuts "/commands/custom/<Primary><Alt>Escape" string xfce4-taskmanager
+X xfce4-keyboard-shortcuts "/commands/custom/<Primary><Alt>Escape" string "$B/force-quit"
 
 log "Mac top-row keys: F3 = Mission Control, F4 = Launchpad"
 X xfce4-keyboard-shortcuts /commands/custom/XF86LaunchA string "$B/mission-control"
@@ -498,22 +510,51 @@ X xfce4-notifyd /notify-location uint 2       # top right
 X xfce4-notifyd /expire-timeout int 5
 X xfce4-notifyd /do-slideout bool true
 
-log "Battery like macOS: dim a little on battery, sleep at 5 %, warnings at 20 % and 10 %"
+log "Battery like macOS: dim a little on battery, display off at 3 min, save to disk at 5 %, warnings at 20 % and 10 %"
 P=/xfce4-power-manager
 X xfce4-power-manager $P/brightness-on-battery uint 120         # after 2 min idle on battery...
 X xfce4-power-manager $P/brightness-level-on-battery uint 40    # ...dim to 40 %
-X xfce4-power-manager $P/blank-on-battery int 5
-X xfce4-power-manager $P/dpms-on-battery-sleep uint 10
-X xfce4-power-manager $P/dpms-on-battery-off uint 15
-X xfce4-power-manager $P/inactivity-on-battery uint 30          # sleep after 30 min idle on battery
+X xfce4-power-manager $P/blank-on-battery int 0                # blanking leaves the backlight on: turn the display
+X xfce4-power-manager $P/dpms-on-battery-sleep uint 3           # itself off at 3 min, as macOS does on battery
+X xfce4-power-manager $P/dpms-on-battery-off uint 3
+X xfce4-power-manager $P/inactivity-on-battery uint 30          # sleep after 30 min idle on battery (then disk after 3 h)
 X xfce4-power-manager $P/inactivity-sleep-mode-on-battery uint 1
 X xfce4-power-manager $P/lid-action-on-battery uint 1           # close the lid = sleep, as on a Mac
 X xfce4-power-manager $P/lid-action-on-ac uint 1
+X xfce4-power-manager $P/blank-on-ac int 0                     # plugged in: display off at 10 min, as on a Mac
+X xfce4-power-manager $P/dpms-on-ac-sleep uint 10
+X xfce4-power-manager $P/dpms-on-ac-off uint 10
+X xfce4-power-manager $P/lock-screen-suspend-hibernate bool true   # password on wake
 X xfce4-power-manager $P/critical-power-level uint 5
-X xfce4-power-manager $P/critical-power-action uint 1           # sleep (keeps open work) rather than shut down
+# Flat battery: save to disk and power off like a Mac (keeps open work), if script 1 set up hibernation; else sleep
+busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanHibernate 2>/dev/null \
+  | grep -q yes && crit=2 || crit=1
+X xfce4-power-manager $P/critical-power-action uint $crit
 printf '[Desktop Entry]\nType=Application\nName=Low battery warning\nExec=%s\nNoDisplay=true\n' "$B/battery-warning" \
   > "$HOME/.config/autostart/battery-warning.desktop"
-pgrep -f "$B/battery-warning" >/dev/null || (setsid "$B/battery-warning" >/dev/null 2>&1 &)
+restart_helper() {   # a re-run swaps in the new copy (each helper allows one copy per login)
+  pkill -u "$(id -u)" -f "^bash $B/$1\$" 2>/dev/null; sleep 0.5; (setsid "$B/$1" >/dev/null 2>&1 < /dev/null &)
+}
+restart_helper battery-warning
+if [ -r /sys/devices/platform/applesmc.768/light ]; then
+  log "Keyboard backlight like a MacBook: on in the dark, off in daylight and after 30 s without typing"
+  printf '[Desktop Entry]\nType=Application\nName=Keyboard light\nExec=%s\nNoDisplay=true\n' "$B/keyboard-light" \
+    > "$HOME/.config/autostart/keyboard-light.desktop"
+  restart_helper keyboard-light
+fi
+
+log "No Mint pop-ups a Mac never shows: Welcome window at login, update shield (updates install by themselves)"
+mkdir -p "$HOME/.linuxmint/mintwelcome" && touch "$HOME/.linuxmint/mintwelcome/norun.flag"
+gsettings set com.linuxmint.updates hide-systray true 2>/dev/null || true
+
+log "Backups like Time Machine: Déjà Dup saves your home folder every week (choose where in Backups, once)"
+if command -v deja-dup >/dev/null; then
+  gsettings set org.gnome.DejaDup periodic true 2>/dev/null
+  gsettings set org.gnome.DejaDup periodic-period 7 2>/dev/null
+  gsettings set org.gnome.DejaDup include-list "['\$HOME']" 2>/dev/null
+  gsettings set org.gnome.DejaDup exclude-list "['\$TRASH', '\$HOME/.cache', '\$HOME/mac-setup', '\$HOME/Downloads']" 2>/dev/null
+fi
+
 
 log "Chrome and Gemini follow the system language (Settings > Languages), checked at each login"
 # Chrome keeps the website languages it was given when the profile was made (English here), so Spanish pages and

@@ -25,8 +25,13 @@ case "$choice" in
       $([ "$cur" = dark ] && echo TRUE || echo FALSE) dark "$D" \
       $([ "$cur" = auto ] && echo TRUE || echo FALSE) auto "$A" 2>/dev/null) || exit 0
     [ -n "$pick" ] && exec "$0" "$pick"; exit 0 ;;
-  --watch)  # started at login: re-check the auto choice every 10 minutes
-    while sleep 600; do [ "$(cat "$CFG/appearance-choice" 2>/dev/null)" = auto ] && "$0" auto; done; exit 0 ;;
+  --watch)  # started at login: re-check the auto choice every 10 minutes; one copy, ends with the login session
+    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/appearance-watch.lock"; flock -n 9 || exit 0
+    while sleep 600; do
+      [ -z "${XDG_SESSION_ID:-}" ] || loginctl show-session "$XDG_SESSION_ID" -p State --value 2>/dev/null \
+        | grep -qE 'active|online' || exit 0
+      [ "$(cat "$CFG/appearance-choice" 2>/dev/null)" = auto ] && "$0" auto
+    done; exit 0 ;;
   *) echo "usage: appearance light|dark|auto"; exit 1 ;;
 esac
 echo "$choice" > "$CFG/appearance-choice"

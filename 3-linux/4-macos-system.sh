@@ -186,7 +186,12 @@ xft-rgba=rgb
 EOF
 # Read after Mint's /usr/share/lightdm/lightdm.conf.d/90-slick-greeter.conf; delete this file to go back
 mkdir -p /etc/lightdm/lightdm.conf.d
-printf '[Seat:*]\ngreeter-session=lightdm-gtk-greeter\n' > /etc/lightdm/lightdm.conf.d/95-macos-greeter.conf
+# Only when it's really installed: pointing LightDM at a missing greeter leaves a black screen at start-up
+if [ -f /usr/share/xgreeters/lightdm-gtk-greeter.desktop ]; then
+  printf '[Seat:*]\ngreeter-session=lightdm-gtk-greeter\n' > /etc/lightdm/lightdm.conf.d/95-macos-greeter.conf
+else
+  rm -f /etc/lightdm/lightdm.conf.d/95-macos-greeter.conf; echo "!! lightdm-gtk-greeter missing - keeping Mint's login screen"
+fi
 
 AV=mac-assets/avatar.png
 if [ -f "$AV" ]; then
@@ -220,8 +225,8 @@ log "Global menu: fix its crash when a window's menu goes away (e.g. moving Chro
 # xfce4-appmenu-plugin 0.7.6 reads a freed menu in get_layout_cb (dbusmenu-importer/model.c) when a menu request is
 # cancelled; the panel then shows "plugin unexpectedly left the panel". Rebuild just the Xfce plugin from Ubuntu's
 # own source with patches/appmenu-get-layout-use-after-free.patch (translations still come from the package, so
-# the source's translation list, which has a duplicate Ubuntu patches out, is skipped). Only for that exact package version: an update
-# of the package simply replaces the rebuilt file.
+# the source's translation list, which has a duplicate Ubuntu patches out, is skipped). Only for that exact package
+# version; the package is then held, so an update can't replace the rebuilt file.
 AV=0.7.6+dfsg1-4build4
 AL=/usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libappmenu-xfce.so
 AM=/var/lib/mintosh/appmenu-fixed
@@ -247,5 +252,29 @@ if [ "$(dpkg-query -W -f='${Version}' xfce4-appmenu-plugin 2>/dev/null)" = "$AV"
   cd "$D"; rm -rf "$W"
   [ -n "$bdeps" ] && apt-get purge -y $bdeps >/dev/null && apt-get autoremove -y >/dev/null
 fi
+# Hold the package while the fixed plugin is in place: an update would put the crashing one back unseen
+[ -f "$AM" ] && [ "$(cat "$AM")" = "$(sha256sum "$AL" 2>/dev/null | cut -d' ' -f1)" ] \
+  && apt-mark hold xfce4-appmenu-plugin >/dev/null
+
+log "Logging out and straight back in starts everything again (dock, menu bar, ⌘ keys)"
+# The user's background services outlive a logout by 10 s (systemd's UserStopDelaySec) or for as long as another
+# session is open. Back in within that time, they still hold the old session's X cookie: the dock's window matcher
+# (bamfdaemon, which the global menu uses too) gives up with "Start request repeated too quickly", and Toshy can't
+# reach the display. Xsession sources this right after 95dbus_update-activation-env hands the new display over.
+cat > /etc/X11/Xsession.d/96mintosh-fresh-user-services <<'EOF'
+# mintosh: restart the user services an earlier session left running. Sourced by Xsession, which runs under set -e:
+# nothing in here may fail or wait, or the login ends, so it all runs in a subshell that always succeeds.
+if [ -n "${DISPLAY:-}" ] && command -v systemctl >/dev/null 2>&1; then
+  (
+    systemctl --user import-environment DISPLAY XAUTHORITY
+    systemctl --user reset-failed   # lets D-Bus start bamfdaemon, notifications and portals again when asked
+    systemctl --user --no-block try-restart bamfdaemon.service xfce4-notifyd.service 'xdg-desktop-portal*.service'
+    # Toshy isn't D-Bus-started: restart its enabled units outright
+    for u in $(systemctl --user list-unit-files 'toshy-*.service' --state=enabled --no-legend | cut -d' ' -f1); do
+      systemctl --user --no-block restart "$u"
+    done
+  ) >/dev/null 2>&1 || :
+fi
+EOF
 
 log "Done. Log out and back in (trackpad, login screen), restart to see the boot screen."

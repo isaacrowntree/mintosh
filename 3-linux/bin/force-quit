@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Force Quit like macOS: lists the open apps (not every process, as a task manager does); pick one and it's closed.
+# Apple menu > Force Quit… and ⌘⌥Esc open it.
+es=0; case "${LANG:-}" in es*) es=1;; esac
+rows=()
+while read -r id _ pid _ title; do
+  [ "$pid" -gt 0 ] 2>/dev/null || continue
+  exe=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+  case "$exe" in plank|xfce4-panel|xfdesktop|wrapper-*|picom|rofi) continue;; esac
+  rows+=("$pid" "${title:-$exe}")
+done < <(wmctrl -lp | awk '$2 != -1')   # -1 = sticky helper windows (dock, menu bar, desktop)
+[ ${#rows[@]} -gt 0 ] || exit 0
+if [ $es = 1 ]; then t="Forzar salida de aplicaciones"; h="Si una aplicación no responde, selecciónela y haga clic en Forzar salida."; ok="Forzar salida"; no="Cancelar"
+else t="Force Quit Applications"; h="If an app doesn't respond, select its name and click Force Quit."; ok="Force Quit"; no="Cancel"; fi
+pid=$(zenity --list --title="$t" --text="$h" --hide-header --hide-column=1 --print-column=1 --width=420 --height=360 \
+  --ok-label="$ok" --cancel-label="$no" --column=pid --column=app "${rows[@]}" 2>/dev/null) || exit 0
+[ -n "$pid" ] || exit 0
+kill "$pid" 2>/dev/null; sleep 2; kill -0 "$pid" 2>/dev/null && kill -9 "$pid"
+exit 0

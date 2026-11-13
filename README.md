@@ -13,7 +13,9 @@ make it look and work like macOS, so whoever used the Mac doesn't have to relear
   between desktops)
 - ⌘C/⌘V/⌘Q/⌘W/⌘Tab and the other Mac shortcuts, Mac trackpad gestures
 - Black boot screen with an Apple logo, a Sonoma-style login screen
-- Battery warnings, sleep on lid close, and the fixes 2013-2015 MacBooks need to run Linux reliably
+- Battery and sleep like a Mac: sleep on lid close, then save to disk and power off after 3 h asleep, so a sleeping
+  laptop lasts weeks; keyboard backlight from the light sensor; memory compression; YouTube on the graphics chip
+- Force Quit, weekly backups, a firewall, and the fixes 2013-2015 MacBooks need to run Linux reliably
 
 | Light | Dark |
 |---|---|
@@ -31,7 +33,8 @@ sits in memory. The look comes from the excellent [MacTahoe](https://github.com/
 theme, the blur from [picom](https://github.com/yshui/picom) and the shortcuts from [Toshy](https://github.com/RedBearAK/toshy);
 this repo wires them, and a lot of small fixes, together.
 
-**Just want the skin?** On any Linux Mint 22 Xfce machine (Mac or not), run scripts 3, 4 and 5 from step 4 below.
+**Just want the skin?** On any Linux Mint 22 Xfce machine (Mac or not), run
+`sudo apt install git plank sassc libglib2.0-dev-bin libxml2-utils fonts-inter`, then scripts 3, 4 and 5 from step 4 below.
 The hardware fixes only switch on when that hardware is present.
 
 **Status:** tested end to end on one MacBookAir6,1 (2013) with Mint 22.3 Xfce, in English and Spanish. Other
@@ -43,8 +46,11 @@ No personal data lives in this repo. Backups go in `$BACKUP_DIR` on the helper M
 
 ### 1. Back up the old Mac (from a helper Mac)
 1. On the old Mac: System Preferences > Sharing > **Remote Login** on.
-2. `ssh-keygen -t ed25519 -f ~/.ssh/mintosh && ssh-copy-id -i ~/.ssh/mintosh user@ip`
-3. `BACKUP_DIR=~/backups/<machine> bash 1-backup/backup-over-ssh.sh user@ip [/Volumes/<extra partition> ...]`
+2. `ssh-keygen -t ed25519 -N "" -f ~/.ssh/mintosh && ssh-copy-id -i ~/.ssh/mintosh user@ip` (OS X 10.9 and older:
+   `-t rsa`)
+3. `export BACKUP_DIR=~/backups/<machine>` (steps 2 and 4 use it too), then
+   `bash 1-backup/backup-over-ssh.sh user@ip [/Volumes/<extra partition> ...]`. It stops with "INCOMPLETE" if any
+   part didn't copy.
 4. Verify: compare file counts on both sides, and spot-check checksums of random files.
    Expect a few hundred missing files from caches under `Library/Containers` - fine.
 5. Note anything only the Mac has: Chrome signed in and **Sync on**? (else export passwords), Mail accounts,
@@ -77,20 +83,24 @@ logs every file kept, every duplicate skipped (with the copy kept) and every jun
 sudo apt install openssh-server                                          # on the new install
 BACKUP_DIR=~/backups/<machine> bash 3-linux/0-send-from-mac.sh user@ip   # from the helper Mac
 cd ~/mac-setup/3-linux
-sudo bash 1-system-setup.sh   # hardware fixes, Chrome, LibreOffice, fonts, printers... then reboot
-bash 2-restore-files.sh       # organized/ -> Desktop, Documents, Pictures, Music, Videos
+sudo bash 1-system-setup.sh   # hardware fixes, sleep, firewall, Chrome, LibreOffice... then reboot (before script 3)
+bash 2-restore-files.sh       # organized/ -> Desktop, Documents, Pictures, Music, Videos, then checks every file
 bash 3-macos-look.sh          # macOS look (run inside the desktop session)
 sudo bash 4-macos-system.sh   # boot + login screen, trackpad, battery saving (after script 3)
 bash 5-mac-shortcuts.sh       # Mac keyboard shortcuts (Toshy); then restart
 ```
 English only by default. For a second language add `LANG2=es_CO` to script 1 (`sudo LANG2=es_CO bash
 1-system-setup.sh`) and `KBD=es` to script 3 for a second keyboard layout.
-Then: Timeshift (system only, daily), sign in to Chrome, import Safari bookmarks if needed, delete
-`~/mac-setup`, remove the helper key from `~/.ssh/authorized_keys`, and turn SSH off:
-`sudo systemctl disable --now ssh.socket ssh` (Mint 22 listens through `ssh.socket` as well).
+Run scripts 3 and 5 in a Terminal on the Mint machine (script 4 is fine over SSH): a panel or dock started over SSH
+loses the session.
+Then: open **Backups** and choose where the weekly backup goes (a USB disk, or Google Drive after signing in), and
+let it run once; Timeshift (system only, 3 daily snapshots); sign in to Chrome; import Safari bookmarks if
+needed; delete `~/mac-setup` once script 2 says every file is in place; and `bash tools/close-access.sh user@ip`
+from the helper Mac (removes the helper key and turns SSH off).
 
 To come back later (re-run scripts 3-5 after changes): `bash tools/open-access.sh` on the helper Mac prints a
-`wget ... | bash` line to run on the Mint machine (temporary key + password-free sudo + SSH on). Then
+`wget` line to run on the Mint machine (temporary key + password-free sudo + SSH on, open to the helper Mac only
+through the firewall). It closes by itself after 48 hours (`HOURS=` changes it). Then
 `bash 3-linux/0-send-from-mac.sh user@ip` (no BACKUP_DIR: sends only the scripts), run them, and
 `bash tools/close-access.sh user@ip` to undo the access.
 
@@ -110,10 +120,10 @@ Host mintosh
 `bash tools/close-access.sh user@mintosh` removes the tunnel and its key on both machines. Through an Android
 phone's tethering the copy ran at ~36 MB/s (the phone stays on home Wi-Fi, not mobile data).
 
-> **Safety:** `open-access.sh` serves its script over plain HTTP on your local network, and running it gives the
-> helper Mac SSH access with password-free sudo. Use it only on a network you trust, keep the server running only
-> until the command has been run, and always finish with `close-access.sh`. Read the served script before running
-> it - the same goes for any `wget | bash`.
+> **Safety:** `open-access.sh` serves its script over plain HTTP on your local network, at an unguessable address,
+> and the command it prints checks the download's SHA-256 before running it. Running it gives the helper Mac SSH
+> access with password-free sudo until `close-access.sh` or the 48-hour deadline, whichever comes first. The tunnel
+> trusts only the helper Mac's own host key. Use it on a network you trust.
 Keep a second copy of `organized/` + `converted/` before deleting the raw backup.
 
 ## What the scripts set up
@@ -121,7 +131,11 @@ Keep a second copy of `organized/` + `converted/` before deleting the raw backup
   LibreOffice, spell check; switch in Settings > Languages) and `KBD=es` for script 3 (a second keyboard layout,
   Alt+Shift, shown in the top bar). Chrome as default browser, LibreOffice saving
   .docx/.xlsx/.pptx by default, MS core fonts + Carlito/Caladea, Inter (SF Pro stand-in), Epson/Canon drivers,
-  automatic updates, password login (autologin off so the keyring unlocks itself).
+  automatic updates, password login (autologin off so the keyring unlocks itself). A firewall that lets nothing
+  connect in, SSH with keys only. Déjà Dup backs up the home folder every week, like Time Machine. Mint's Welcome
+  window and update shield stay hidden (updates install by themselves).
+- **Memory:** compressed before anything is swapped (zswap, zstd), as macOS does, so 4 GB copes with many tabs;
+  earlyoom closes the biggest app instead of letting the desktop freeze when memory runs out.
 - **macOS look:** [MacTahoe](https://github.com/vinceliuice/MacTahoe-gtk-theme) theme, icons and cursor in light and
   dark, Inter font (SF Pro stand-in), window buttons on the left, centred titles, rounded corners and soft shadows,
   double-click to zoom, Plank dock on glass (Finder, Launchpad, apps | Downloads, Trash), rotating macOS-style
@@ -156,8 +170,18 @@ Keep a second copy of `organized/` + `converted/` before deleting the raw backup
   desktops; one desktop to start with, as on a Mac.
 - **Trackpad:** natural scrolling, tap to click, two-finger click = right click; thumb + three fingers pinch =
   Launchpad, spread = show desktop (Touchegg).
-- **Battery:** dims on battery, lid = sleep, sleeps at 5 %, "Low Battery" warnings at 20 % and 10 % (UPower's
-  figure, as in the menu bar; the kernel's `capacity` reads lower on this Mac), TLP.
+- **Battery and sleep:** on battery the display dims at 2 min and turns off at 3 (10 min plugged in); 30 min idle
+  sleeps. Closing the lid, Apple menu > Sleep and idle all sleep, and after 3 h asleep the Mac saves memory to disk
+  and powers off, as a Mac does ("standby"); opening it later resumes where you left off, at the password prompt.
+  At 5 % it saves to disk and powers off without losing work. "Low Battery" warnings at 20 % and 10 % (the 10 % one
+  stays until closed; UPower's figure, as in the menu bar). Hibernation is set up by script 1 on laptops with an
+  ext4 `/`: a swapfile the size of RAM and `resume=` in GRUB; without room for it, sleep stays plain sleep. TLP.
+- **Keyboard backlight:** on in dim light, off in daylight, from the Mac's ambient light sensor; off after 30 s
+  without typing and back at the next key, as on a MacBook (`bin/keyboard-light`). The brightness keys still work.
+- **Video:** YouTube comes as H.264 (the h264ify extension, installed by Chrome policy), which the 2012-15 Macs'
+  graphics chips decode themselves, with Chrome's hardware video decoding on; VP9/AV1 would run on the processor.
+- **Force Quit** (Apple menu, ⌘⌥Esc) lists the open apps, as on a Mac, not every process.
+- **Accents the Mac way:** ⌥e then e = é, ⌥n then n = ñ (Toshy's Option-key special characters, U.S. layout).
 - **Chrome language:** at each login Chrome's website languages are set from the system language (e.g. es-CO
   first when the system is switched to Spanish) and the Translate pop-up is off for those languages. Chrome must be closed for this.
 - **Gemini:** Google's assistant as its own app window (Chrome `--app`), with a button at the far right of the menu
@@ -171,13 +195,16 @@ Keep a second copy of `organized/` + `converted/` before deleting the raw backup
 ## Hardware notes (MacBookAir6,1 and 6,2, 2013-14) - most apply to 2013-2015 MacBooks
 | Problem | Fix (in `1-system-setup.sh`, gated on the hardware) |
 |---|---|
-| SSD invisible to the installer; `ata1: failed to IDENTIFY` (Marvell 88SS9183, `1b4b:9183`) | boot with `intel_iommu=off`; after install, `sudo IOMMU_OFF=1 bash 1-system-setup.sh` makes it permanent |
+| SSD invisible to the installer; `ata1: failed to IDENTIFY` (Marvell 88SS9183, `1b4b:9183`) | boot with `intel_iommu=off`; after install, `sudo IOMMU_OFF=1 bash 1-system-setup.sh` makes it permanent (any value turns it on; to undo, remove `intel_iommu=off` from `/etc/default/grub` and `sudo update-grub`) |
 | Desktop freezes after ~1 h, hundreds of `ata1: hard resetting link`, I/O errors (Toshiba `APPLE SSD TS0256F`) | SATA link power saving off: `ahci.mobile_lpm_policy=1` (automatic for `APPLE SSD TS*`; `LPM_OFF=1` forces it) |
 | `ata1: exception ... PHYRdyChg`, link slows to 3 then 1.5 Gb/s within a minute of boot (SanDisk `APPLE SSD SD0256F`) | the opposite: this SSD needs link power saving **on** - leave out `ahci.mobile_lpm_policy=1` (`LPM_OFF=0` removes it) |
 | No Wi-Fi in the installer (Broadcom BCM4360) | `bcmwl-kernel-source` (on the Mint ISO); Driver Manager in the live session |
 | No Wi-Fi at all: no `14e4:43a0` in `lspci`, `00:1c.2: retraining failed` at boot, Bluetooth still works | the Wi-Fi chip on the card has died - see below |
 | No camera (FaceTime HD, `14e4:1570`) | `facetimehd` driver + firmware via DKMS |
-| Runs hot | `mbpfan` |
+| Runs hot | `mbpfan` (laptops) |
+| 2015 MacBook Pro 15" (BCM43602) or 12" MacBook (BCM4350) Wi-Fi | built-in `brcmfmac`; `wl` is only installed for the chips it supports |
+| Camera or Wi-Fi gone after waking | `/usr/lib/systemd/system-sleep/mintosh` unloads the camera driver before sleep and reloads it after, and reloads `wl` after a resume from disk |
+| A kernel update leaves Wi-Fi without its driver (no Wi-Fi = no update to fix it) | `mintosh-bootcheck` starts the previous kernel until the newest one has the driver again; the camera driver builds from a hook that never stops a kernel update |
 | Top-row keys | work by default (`hid_apple fnmode=3`); pop-ups need enabling (script 3) |
 
 **TLP undoes the SATA fix** unless told not to: its defaults turn SATA link power management back on on battery.
@@ -186,7 +213,7 @@ Script 4 writes `/etc/tlp.d/90-apple.conf` on Apple hardware: AHCI runtime PM of
 
 `libata.force=noncq,1.5Gbps` is **not** needed - with the right options for the SSD it runs at 6 Gb/s with NCQ.
 
-**A dead Wi-Fi card** (Silvana's Air): under macOS it first crashed under sustained transfers (`wl0: fatal error,
+**A dead Wi-Fi card** (on a second 2013 Air): under macOS it first crashed under sustained transfers (`wl0: fatal error,
 reinitializing`, then `dead chip, off[0] bar0[0xffffffff]`), then vanished from the PCI bus. On Linux the slot
 (root port `00:1c.2`, ACPI `\_SB.PCI0.RP03.ARPT`) sees a card present (`PresDet+`) but the link never trains
 (`Width x0`, `DLActive-`). The card is the 2013-17 Air combo card (Wi-Fi on PCIe, Bluetooth on USB), so working
@@ -207,10 +234,14 @@ installs the driver when it sees the card, so on a machine with a dead card inst
   `xfce4-appmenu-plugin` 0.7.6, the version Ubuntu 24.04 / Mint 22 ship, reads a menu after freeing it when a menu
   request is cancelled (`get_layout_cb` in `dbusmenu-importer/model.c`). Script 4 rebuilds just that plugin from
   Ubuntu's own source with a one-function patch, `3-linux/patches/appmenu-get-layout-use-after-free.patch`, and
-  removes the build tools again. An update of the package replaces the rebuilt file.
+  removes the build tools again. The package is then held, so an update can't replace the rebuilt file.
 - **The glass blur disappeared after the panel restarted.** picom 10.2 (the same releases' version) can abort on an
   internal check (`!w->mask_image` in `win_bind_mask`) when a window is recreated. It now runs under
-  `bin/glass`, which starts it again within a second after a crash.
+  `bin/glass`, which starts it again within a second after a crash, and falls back to Xfce's own compositor if
+  it keeps crashing.
+- **Logging out and straight back in** brings the dock, the global menu and the ⌘ keys back at once:
+  `/etc/X11/Xsession.d/96mintosh-fresh-user-services` (script 4) hands the new display to the user services still
+  running from the last session and restarts them.
 
 ## Lessons
 - Run scripts that change the desktop (panel, dock) inside the session, not over SSH: an SSH-started panel or
@@ -253,6 +284,17 @@ orb -m mintosh-test -u root python3 -I test/mintosh-test.py           # shortcut
 - Mac shortcuts: `python3 ~/.cache/toshy-src/setup_toshy.py uninstall`.
 - Top bar back to Mint's: `xfce4-panel --quit; xfconf-query -c xfce4-panel -p / -R -r; xfce4-panel &` (log out and in).
 - Battery saver: `sudo apt remove tlp`.
+- Sleep then save to disk: `sudo rm /etc/systemd/system/systemd-suspend.service.d/90-mintosh.conf
+  /etc/systemd/sleep.conf.d/90-mintosh.conf /etc/polkit-1/rules.d/10-mintosh-hibernate.rules
+  /etc/initramfs-tools/conf.d/resume`, remove `resume=… resume_offset=…` from `/etc/default/grub`, then
+  `sudo update-grub && sudo update-initramfs -u && sudo systemctl daemon-reload`.
+- Login refresh: `sudo rm /etc/X11/Xsession.d/96mintosh-fresh-user-services`.
+- Memory compression: `sudo rm /etc/tmpfiles.d/90-mintosh-zswap.conf`; earlyoom: `sudo apt remove earlyoom`.
+- Firewall: `sudo ufw disable`. Kernel fallback: `sudo systemctl disable mintosh-bootcheck` and
+  `sudo rm /etc/default/grub.d/90-mintosh-default.cfg && sudo update-grub`.
+- Keyboard backlight: `rm ~/.config/autostart/keyboard-light.desktop`. YouTube H.264:
+  `sudo rm /etc/opt/chrome/policies/managed/mintosh.json`.
+- Glass: `rm ~/.config/autostart/picom.desktop`, then `xfconf-query -c xfwm4 -p /general/use_compositing -s true`.
 
 ## Credits
 Downloaded or installed at run time, not redistributed here:
@@ -260,7 +302,7 @@ Downloaded or installed at run time, not redistributed here:
 [Toshy](https://github.com/RedBearAK/toshy), [rofi](https://github.com/davatorium/rofi),
 [Touchégg](https://github.com/JoseExposito/touchegg), [vala-panel-appmenu](https://github.com/rilian-la-te/vala-panel-appmenu),
 [Plank](https://launchpad.net/plank), [lightdm-gtk-greeter](https://github.com/Xubuntu/lightdm-gtk-greeter),
-[TLP](https://linrunner.de/tlp/), [facetimehd](https://github.com/patjak/facetimehd), [mbpfan](https://github.com/linux-on-mac/mbpfan),
+[TLP](https://linrunner.de/tlp/), [h264ify](https://github.com/erkserkserks/h264ify), [earlyoom](https://github.com/rfjakob/earlyoom), [Déjà Dup](https://apps.gnome.org/DejaDup/), [facetimehd](https://github.com/patjak/facetimehd), [mbpfan](https://github.com/linux-on-mac/mbpfan),
 and Linux Mint and Xfce themselves. Each keeps its own licence.
 
 ## License and trademarks

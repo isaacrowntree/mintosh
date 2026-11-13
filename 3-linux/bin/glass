@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # picom (the glass blur) with a safety net. picom 10.2, the one Ubuntu 24.04 / Mint 22 ships, can abort on an
 # internal check when a window is recreated (`!w->mask_image` in win_bind_mask, e.g. when the panel restarts) and
-# the glass would stay off until the next login. Start it again instead. A normal stop or a config error ends it.
+# the glass would stay off until the next login. It can also segfault when the display goes away under it (log out
+# and straight back in). Start it again instead. A normal stop or a config error ends it. If it keeps crashing
+# (5 times within a minute, e.g. a graphics driver update it can't use), fall back to Xfce's plain compositor.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/glass.lock"; flock -n 9 || exit 0   # one copy per login
+crashes=()
 while :; do
   picom "$@"; rc=$?
-  [ "$rc" -eq 134 ] || exit "$rc"   # 134 = aborted (SIGABRT); anything else is deliberate
+  [ "$rc" -eq 134 ] || [ "$rc" -eq 139 ] || exit "$rc"   # 134 = aborted, 139 = segfault; anything else is deliberate
+  now=$(date +%s); crashes+=("$now")
+  [ ${#crashes[@]} -gt 5 ] && crashes=("${crashes[@]: -5}")
+  if [ ${#crashes[@]} -eq 5 ] && [ $((now - crashes[0])) -lt 60 ]; then
+    xfconf-query -c xfwm4 -p /general/use_compositing -s true 2>/dev/null
+    exit 1
+  fi
   sleep 1
 done

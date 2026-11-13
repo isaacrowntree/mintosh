@@ -319,8 +319,18 @@ for acct in os.listdir(MAILV4):
                 open(os.path.join(md, f"{box.split('.')[0]} - {n:02d} - {name}.eml"), "wb").write(msg)
 print("emails:", n)
 
-# Notes + Safari bookmarks
+# What convert.py made: contacts, calendar, Safari bookmarks, Notes and the mail archive. Each is the only copy of
+# that data once the old Mac is wiped, so a missing one is reported, never skipped silently.
 cv = CONV
-subprocess.run(["cp", "-cp", os.path.join(cv, "safari-bookmarks.html"), mk("Documents", "From the Mac")], check=True)
-subprocess.run(["cp", "-cpR", os.path.join(cv, "notes") + "/", mk("Documents", "From the Mac", "Notas")], check=True)
+fm = mk("Documents", "From the Mac")
+for name, dest in [("contacts.vcf", fm), ("calendar.ics", fm), ("safari-bookmarks.html", fm),
+                   ("notes", mk("Documents", "From the Mac", "Notas")), ("mail-archive", mk("Documents", "From the Mac", "Mail"))]:
+    src = os.path.join(cv, name)
+    if not os.path.exists(src):
+        print(f"!! not converted, not copied: {name} (run convert.py, or skip if that Mac didn't use it)")
+        continue
+    if os.path.isdir(src):
+        subprocess.run(["cp", "-cpR", src + "/", dest], check=True)
+    else:
+        subprocess.run(["cp", "-cp", src, dest], check=True)
 print("done")
